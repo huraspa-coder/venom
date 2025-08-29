@@ -1,12 +1,15 @@
-// server.js - arranca venom y opcionalmente sirve el QR como imagen
+// server.js
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
+const bodyParser = require('body-parser');
 const venom = require('venom-bot');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SESSION = process.env.SESSION_NAME || 'venom-session';
+
+app.use(bodyParser.json());
 
 // Railway inyecta RAILWAY_VOLUME_MOUNT_PATH cuando adjuntas un Volume
 const RAILWAY_VOLUME_MOUNT_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH || '/data/tokens';
@@ -18,11 +21,12 @@ fs.mkdirSync(TOKENS_FOLDER, { recursive: true });
 console.log('Tokens will be stored in:', TOKENS_FOLDER);
 
 let lastQrPath = path.join(TOKENS_FOLDER, 'out.png');
+let venomClient;
 
 venom
   .create(
     SESSION,
-    // catchQR: guardar png en volume para que puedas ver/descargar
+    // catchQR
     (base64Qrimg, asciiQR, attempts, urlCode) => {
       console.log('QR attempts:', attempts);
       try {
@@ -35,23 +39,19 @@ venom
       } catch (e) {
         console.error('Error al guardar QR:', e.message);
       }
-      // asciiQR también aparece en logs
-      console.log(asciiQR);
+      console.log(asciiQR); // QR en logs Railway
     },
-    // status callback
     (statusSession, session) => {
       console.log('Status Session: ', statusSession, ' session name: ', session);
     },
-    // options
     {
       folderNameToken: 'venom_tokens',
-      mkdirFolderToken: RAILWAY_VOLUME_MOUNT_PATH, // VENOM guardará tokens aquí
+      mkdirFolderToken: RAILWAY_VOLUME_MOUNT_PATH,
       headless: 'new',
       debug: false,
       logQR: true,
       disableSpins: true,
       puppeteerOptions: {
-        // Ajusta ejecutable si lo necesitas
         executablePath: process.env.CHROME_PATH || '/usr/bin/chromium',
         args: [
           '--no-sandbox',
@@ -64,11 +64,27 @@ venom
     }
   )
   .then((client) => {
+    venomClient = client;
     console.log('Venom listo, cliente en ejecución.');
+
+    // Listener de mensajes entrantes
     client.onMessage((message) => {
-      // ejemplo simple de respuesta — puedes quitarlo
+      console.log('Mensaje recibido:', message.body, 'de', message.from);
+
+      // (Ejemplo de respuesta automática, opcional)
       if (message.body === 'Hi' && !message.isGroupMsg) {
         client.sendText(message.from, 'Welcome Venom 🕷');
+      }
+
+      // Enviar mensaje entrante a Botpress (si configuras BOTPRESS_WEBHOOK_URL)
+      if (process.env.BOTPRESS_WEBHOOK_URL) {
+        const axios = require('axios');
+        axios.post(process.env.BOTPRESS_WEBHOOK_URL, {
+          from: message.from,
+          body: message.body,
+          type: message.type,
+          isGroup: message.isGroupMsg,
+        }).catch(err => console.error('Error enviando a Botpress:', err.message));
       }
     });
   })
@@ -76,7 +92,26 @@ venom
     console.error('Error creando cliente Venom:', erro);
   });
 
-// Endpoint para descargar/ver QR
+/* ========================
+   API REST PARA BOTPRESS
+   ======================== */
+
+// Enviar mensaje a WhatsApp
+app.post('/send-message', async (req, res) => {
+  try {
+    const { to, message } = req.body;
+    if (!venomClient) {
+      return res.status(503).json({ error: 'WhatsApp client not ready yet' });
+    }
+    const result = await venomClient.sendText(to, message);
+    res.json({ success: true, result });
+  } catch (err) {
+    console.error('Error en /send-message:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// QR como PNG
 app.get('/qr', (req, res) => {
   if (fs.existsSync(lastQrPath)) {
     res.sendFile(lastQrPath);
@@ -85,7 +120,8 @@ app.get('/qr', (req, res) => {
   }
 });
 
-app.get('/', (req, res) => res.send('Venom service running'));
+// Healthcheck
+app.get('/', (req, res) => res.send('Venom service running ✅'));
 
 app.listen(PORT, () => {
   console.log(`HTTP server listening on port ${PORT}`);
