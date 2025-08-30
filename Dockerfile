@@ -1,7 +1,7 @@
 # Dockerfile para correr Venom con Chromium en Railway (Node 20)
 FROM node:20-bullseye
 
-# Evitar preguntas interactivas y actualizar
+# Evitar preguntas interactivas
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Instalar dependencias para Chromium / Puppeteer
@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
-# Intentar instalar chromium (opción simple)
+# Instalar Chromium (opción simple)
 RUN apt-get update && apt-get install -y chromium && rm -rf /var/lib/apt/lists/* || true
 
 # Directorio de trabajo
@@ -25,9 +25,8 @@ WORKDIR /usr/src/app
 # Copiar package.json y lock para instalar deps (mejor cache)
 COPY package*.json ./
 
-# Instalar deps (puppeteer/venom) - si puppeteer descarga chromium, lo hará aquí
-# Instalar solo lo necesario para correr tu bot (sin preparar la librería entera)
-RUN npm install --production
+# Instalar solo dependencias necesarias y saltar scripts que no aplican en Railway
+RUN npm install --production --ignore-scripts
 
 # Copiar resto del repo
 COPY . .
