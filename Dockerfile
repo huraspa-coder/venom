@@ -26,7 +26,8 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 
 # Instalar deps (puppeteer/venom) - si puppeteer descarga chromium, lo hará aquí
-RUN npm ci --omit=dev
+# Instalar solo lo necesario para correr tu bot (sin preparar la librería entera)
+RUN npm install --production
 
 # Copiar resto del repo
 COPY . .
