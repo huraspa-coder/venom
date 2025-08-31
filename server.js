@@ -14,6 +14,7 @@ const VENOM_TOKENS_PATH = process.env.VENOM_TOKENS_PATH || "/data/tokens";
 const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY || "123456";
 const BOTPRESS_WEBHOOK_URL = process.env.BOTPRESS_WEBHOOK_URL || "";
 const WHATSAPP_DEFAULT_NUMBER = process.env.WHATSAPP_DEFAULT_NUMBER || "";
+const CHROME_PATH = process.env.CHROME_PATH || undefined;
 
 // Asegurar carpeta de tokens
 fs.mkdirSync(VENOM_TOKENS_PATH, { recursive: true });
@@ -35,7 +36,7 @@ venom
       qrCodeBase64 = base64Qr;
       console.log("✅ QR recibido, disponible en /qr");
     },
-    browserPathExecutable: process.env.CHROME_PATH || undefined,
+    browserPathExecutable: CHROME_PATH,
   })
   .then((client) => {
     venomClient = client;
@@ -49,7 +50,7 @@ venom
         client.sendText(message.from, "¡Hola! Bot conectado 🚀").catch(console.error);
       }
 
-      // Enviar mensaje a Botpress si está configurado
+      // Enviar mensaje a Botpress si configurado
       if (BOTPRESS_WEBHOOK_URL) {
         axios
           .post(
@@ -81,21 +82,22 @@ app.get("/qr", (req, res) => {
 // Healthcheck
 app.get("/", (req, res) => res.send("Venom BOT corriendo en Railway 🚀"));
 
-// Enviar mensaje
-app.post("/send-message", (req, res) => {
-  if (!venomClient) return res.status(400).json({ error: "Bot no iniciado" });
+// Enviar mensaje (espera a que Venom esté conectado)
+app.post("/send-message", async (req, res) => {
+  // Esperar a que el cliente esté listo
+  const waitForClient = async () => {
+    while (!venomClient) await new Promise((r) => setTimeout(r, 500));
+  };
+  await waitForClient();
 
   const { to, message } = req.body;
-  if (!to || !message) return res.status(400).json({ error: "Faltan parámetros 'to' o 'message'" });
-
-  // Asegurarse que el número termine con @c.us
-  const recipient = to.endsWith("@c.us") ? to : to + "@c.us";
+  if (!to || !message)
+    return res.status(400).json({ error: "Faltan parámetros 'to' o 'message'" });
 
   venomClient
-    .sendText(recipient, message)
+    .sendText(to + "@c.us", message)
     .then(() => res.json({ success: true }))
     .catch((err) => res.status(500).json({ error: err.message }));
 });
 
-// Servidor
 app.listen(PORT, () => console.log(`✅ Servidor escuchando en puerto ${PORT}`));
