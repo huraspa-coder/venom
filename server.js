@@ -12,19 +12,19 @@ const PORT = process.env.PORT || 3000;
 const SESSION_NAME = process.env.SESSION_NAME || "venom-session";
 const VENOM_TOKENS_PATH = process.env.VENOM_TOKENS_PATH || "/data/tokens";
 const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY || "";
-const BOTPRESS_WEBHOOK_ID = process.env.BOTPRESS_WEBHOOK_URL || ""; // Solo ID de Chat API
+const BOTPRESS_WEBHOOK_URL = process.env.BOTPRESS_WEBHOOK_URL || "";
 const WHATSAPP_DEFAULT_NUMBER = process.env.WHATSAPP_DEFAULT_NUMBER || "";
 const CHROME_PATH = process.env.CHROME_PATH || undefined;
 
 // Asegurar carpeta de tokens
 fs.mkdirSync(VENOM_TOKENS_PATH, { recursive: true });
+console.log("📂 Carpeta de tokens asegurada en:", VENOM_TOKENS_PATH);
 
-// Variables globales
 let qrCodeBase64 = null;
 let venomClient = null;
 
-// Función para generar x-user-key para Chat API
-function generateXUserKey(userId) {
+// Función para generar x-user-key JWT para Botpress Chat API
+function generateUserKey(userId) {
   return jwt.sign({ id: userId }, BOTPRESS_API_KEY, { algorithm: "HS256" });
 }
 
@@ -56,33 +56,25 @@ venom
       }
 
       // Enviar mensaje a Botpress Chat API
-      if (BOTPRESS_WEBHOOK_ID) {
+      if (BOTPRESS_WEBHOOK_URL) {
         try {
-          const xUserKey = generateXUserKey("venom_user_" + message.from);
-          
-          // Crear conversación
-          const convResp = await axios.post(
-            `https://chat.botpress.cloud/${BOTPRESS_WEBHOOK_ID}/createConversation`,
-            {},
-            { headers: { "x-user-key": xUserKey } }
-          );
-
-          const conversationId = convResp.data.id;
-
-          // Enviar mensaje a la conversación
+          const userKey = generateUserKey(message.from); // JWT con userId = número del remitente
           await axios.post(
-            `https://chat.botpress.cloud/${BOTPRESS_WEBHOOK_ID}/createMessage`,
+            BOTPRESS_WEBHOOK_URL,
             {
-              conversationId,
               type: "text",
               text: message.body,
             },
-            { headers: { "x-user-key": xUserKey } }
+            {
+              headers: {
+                "Content-Type": "application/json",
+                "x-user-key": userKey,
+              },
+            }
           );
-
           console.log("✅ Mensaje enviado a Botpress Chat API");
         } catch (err) {
-          console.error("❌ Error enviando a Botpress:", err.response?.data || err.message);
+          console.error("❌ Error enviando a Botpress:", err.response?.status, err.response?.data || err.message);
         }
       }
     });
@@ -105,9 +97,9 @@ app.get("/qr", (req, res) => {
 });
 
 // Healthcheck
-app.get("/", (req, res) => res.send("Venom BOT corriendo 🚀"));
+app.get("/", (req, res) => res.send("Venom BOT corriendo en Railway 🚀"));
 
-// Enviar mensaje desde Postman
+// Enviar mensaje desde endpoint
 app.post("/send-message", async (req, res) => {
   if (!venomClient) return res.status(400).json({ error: "Bot no iniciado" });
 
@@ -115,7 +107,7 @@ app.post("/send-message", async (req, res) => {
   if (!to || !message) return res.status(400).json({ error: "Faltan parámetros 'to' o 'message'" });
 
   try {
-    await venomClient.sendText(to + "@c.us", message);
+    await venomClient.sendText(to.includes("@c.us") ? to : `${to}@c.us`, message);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
