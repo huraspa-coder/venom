@@ -1,79 +1,71 @@
-// server.js
 const express = require("express");
 const venom = require("venom-bot");
 const fs = require("fs");
 const path = require("path");
+const axios = require("axios");
 
 const app = express();
 app.use(express.json());
 
+// Variables de entorno
 const PORT = process.env.PORT || 3000;
 const SESSION_NAME = process.env.SESSION_NAME || "venom-session";
 const VENOM_TOKENS_PATH = process.env.VENOM_TOKENS_PATH || "/data/tokens";
-const VOLUME_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/data";
+const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY || "123456";
+const BOTPRESS_WEBHOOK_URL = process.env.BOTPRESS_WEBHOOK_URL || "";
+const WHATSAPP_DEFAULT_NUMBER = process.env.WHATSAPP_DEFAULT_NUMBER || "";
 
-// Carpeta de sesión persistente
-const SESSION_DIR = path.join(VOLUME_PATH, "venom-session");
-const QR_PATH = path.join(SESSION_DIR, "qr.png");
+// Asegurar carpeta de tokens
+fs.mkdirSync(VENOM_TOKENS_PATH, { recursive: true });
+console.log("📂 Carpeta de tokens asegurada en:", VENOM_TOKENS_PATH);
 
-// Crear carpeta si no existe
-fs.mkdirSync(SESSION_DIR, { recursive: true });
-console.log("📂 Carpeta de tokens asegurada en:", SESSION_DIR);
-
-let venomClient;
 let qrCodeBase64 = null;
+let venomClient = null;
 
-// Crear sesión Venom
+// Iniciar Venom
 venom
-  .create(
-    SESSION_NAME,
-    (base64Qr) => {
+  .create({
+    session: SESSION_NAME,
+    multidevice: true,
+    headless: true,
+    folderNameToken: VENOM_TOKENS_PATH,
+    mkdirFolderToken: VENOM_TOKENS_PATH,
+    logQR: false,
+    catchQR: (base64Qr) => {
       qrCodeBase64 = base64Qr;
-
-      // Guardar QR como imagen
-      const matches = base64Qr.match(/^data:image\/png;base64,(.+)$/);
-      if (matches) {
-        const buffer = Buffer.from(matches[1], "base64");
-        fs.writeFileSync(QR_PATH, buffer, "binary");
-        console.log("✅ QR guardado en:", QR_PATH);
-      }
       console.log("✅ QR recibido, disponible en /qr");
     },
-    undefined,
-    {
-      headless: true,
-      logQR: false,
-      browserPathExecutable: process.env.CHROME_PATH || "/usr/bin/chromium",
-      browserArgs: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-first-run",
-        "--no-zygote",
-        "--disable-gpu",
-      ],
-      mkdirFolderToken: VENOM_TOKENS_PATH,
-      folderNameToken: SESSION_NAME,
-    }
-  )
+    browserPathExecutable: process.env.CHROME_PATH || undefined,
+  })
   .then((client) => {
     venomClient = client;
     console.log("🤖 Venom iniciado correctamente");
 
-    // Ejemplo de respuesta automática
     client.onMessage((message) => {
       console.log(`📩 Mensaje recibido: ${message.body} de ${message.from}`);
+
+      // Respuesta automática simple
       if (message.body.toLowerCase() === "hola") {
-        client.sendText(message.from, "👋 Hola, bot funcionando!").catch(console.error);
+        client.sendText(message.from, "¡Hola! Bot conectado 🚀").catch(console.error);
+      }
+
+      // Enviar mensaje a Botpress
+      if (BOTPRESS_WEBHOOK_URL) {
+        axios
+          .post(
+            BOTPRESS_WEBHOOK_URL,
+            { from: message.from, message: message.body },
+            { headers: { Authorization: `Bearer ${BOTPRESS_API_KEY}` } }
+          )
+          .catch((err) => console.error("❌ Error enviando a Botpress:", err.message));
       }
     });
   })
   .catch((err) => console.error("❌ Error iniciando Venom:", err));
 
 // Endpoints
-app.get("/", (req, res) => res.send("Venom BOT corriendo en Railway 🚀"));
 
+// Mostrar QR
 app.get("/qr", (req, res) => {
   if (!qrCodeBase64) return res.send("⚡ QR aún no generado. Recarga en unos segundos...");
   res.send(`
@@ -86,26 +78,20 @@ app.get("/qr", (req, res) => {
   `);
 });
 
-app.get("/status", (req, res) => {
-  if (venomClient && venomClient.isConnected()) {
-    res.json({ status: "logged", message: "Cliente WhatsApp conectado ✅" });
-  } else {
-    res.json({ status: "not_logged", message: "Cliente esperando QR o no iniciado ❌" });
-  }
-});
+// Healthcheck
+app.get("/", (req, res) => res.send("Venom BOT corriendo en Railway 🚀"));
 
-app.post("/send-message", async (req, res) => {
+// Enviar mensaje
+app.post("/send-message", (req, res) => {
   if (!venomClient) return res.status(400).json({ error: "Bot no iniciado" });
 
   const { to, message } = req.body;
   if (!to || !message) return res.status(400).json({ error: "Faltan parámetros 'to' o 'message'" });
 
-  try {
-    await venomClient.sendText(to, message);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  venomClient
+    .sendText(to + "@c.us", message)
+    .then(() => res.json({ success: true }))
+    .catch((err) => res.status(500).json({ error: err.message }));
 });
 
-app.listen(PORT, () => console.log(`🚀 Servidor escuchando en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`✅ Servidor escuchando en puerto ${PORT}`));
