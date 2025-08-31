@@ -7,13 +7,13 @@ const app = express();
 app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
-// Carpeta persistente en Railway
+// Carpeta persistente en Railway usando la variable de entorno
 const VOLUME_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/data";
-const SESSION_DIR = path.join(VOLUME_PATH, "venom-session", "tokens");
-const QR_PATH = path.join(SESSION_DIR, "venom-session", "qr.png");
+const SESSION_DIR = path.join(VOLUME_PATH, "venom-session");
+const QR_PATH = path.join(SESSION_DIR, "qr.png");
 
 // Crear carpeta si no existe
-fs.mkdirSync(path.join(SESSION_DIR, "venom-session"), { recursive: true });
+fs.mkdirSync(SESSION_DIR, { recursive: true });
 console.log("📂 Carpeta de tokens asegurada en:", SESSION_DIR);
 
 let venomClient;
@@ -21,9 +21,8 @@ let venomClient;
 // Crear sesión Venom
 venom
   .create(
-    "venom-session",
+    process.env.SESSION_NAME || "venom-session",
     (base64Qr) => {
-      // Guardar QR en caso de que no haya sesión válida
       const matches = base64Qr.match(/^data:image\/png;base64,(.+)$/);
       if (matches) {
         const buffer = Buffer.from(matches[1], "base64");
@@ -35,7 +34,7 @@ venom
     {
       headless: true,
       logQR: false,
-      browserPathExecutable: "/usr/bin/chromium",
+      browserPathExecutable: process.env.CHROME_PATH || "/usr/bin/chromium",
       browserArgs: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -46,7 +45,7 @@ venom
         "--disable-gpu",
       ],
       mkdirFolderToken: SESSION_DIR,
-      folderNameToken: "venom-session",
+      folderNameToken: "", // <- dejar vacío para usar la carpeta tal cual
     }
   )
   .then((client) => {
@@ -76,8 +75,7 @@ app.post("/send-message", (req, res) => {
   const { to, message } = req.body;
   if (!venomClient) return res.status(400).json({ error: "Bot no iniciado" });
 
-  venomClient
-    .sendText(to + "@c.us", message)
+  venomClient.sendText(to + "@c.us", message)
     .then(() => res.json({ success: true }))
     .catch((err) => res.status(500).json({ error: err.message }));
 });
