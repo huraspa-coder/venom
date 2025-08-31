@@ -12,7 +12,7 @@ const SESSION = process.env.SESSION_NAME || 'venom-session';
 app.use(bodyParser.json());
 
 // Railway inyecta RAILWAY_VOLUME_MOUNT_PATH cuando adjuntas un Volume
-const RAILWAY_VOLUME_MOUNT_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH || '/data/tokens';
+const RAILWAY_VOLUME_MOUNT_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH || '/data';
 const TOKENS_FOLDER = path.join(RAILWAY_VOLUME_MOUNT_PATH, 'venom_tokens');
 
 // Ensure folder exists
@@ -20,7 +20,8 @@ fs.mkdirSync(TOKENS_FOLDER, { recursive: true });
 
 console.log('Tokens will be stored in:', TOKENS_FOLDER);
 
-let lastQrPath = path.join(TOKENS_FOLDER, 'out.png');
+// Aquí guardaremos el último QR generado
+let lastQrPath = path.join(RAILWAY_VOLUME_MOUNT_PATH, 'out.png');
 let venomClient;
 
 venom
@@ -34,12 +35,13 @@ venom
         if (matches && matches[2]) {
           const buffer = Buffer.from(matches[2], 'base64');
           fs.writeFileSync(lastQrPath, buffer);
-          console.log('QR guardado en', lastQrPath);
+          console.log('✅ QR guardado en', lastQrPath);
         }
       } catch (e) {
         console.error('Error al guardar QR:', e.message);
       }
-      console.log(asciiQR); // QR en logs Railway
+      // También mostramos QR en ASCII en los logs
+      console.log(asciiQR);
     },
     (statusSession, session) => {
       console.log('Status Session: ', statusSession, ' session name: ', session);
@@ -49,7 +51,7 @@ venom
       mkdirFolderToken: RAILWAY_VOLUME_MOUNT_PATH,
       headless: 'new',
       debug: false,
-      logQR: true,
+      logQR: false, // lo desactivo porque ahora ya lo guardamos en PNG
       disableSpins: true,
       puppeteerOptions: {
         executablePath: process.env.CHROME_PATH || '/usr/bin/chromium',
