@@ -11,10 +11,10 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const SESSION_NAME = process.env.SESSION_NAME || "venom-session";
 const VENOM_TOKENS_PATH = process.env.VENOM_TOKENS_PATH || "/data/tokens";
-const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY || "";
+const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY || "123456";
 const BOTPRESS_WEBHOOK_URL = process.env.BOTPRESS_WEBHOOK_URL || "";
-const BOTPRESS_WEBHOOK_SECRET = process.env.BOTPRESS_WEBHOOK_SECRET || "";
 const WHATSAPP_DEFAULT_NUMBER = process.env.WHATSAPP_DEFAULT_NUMBER || "";
+const CHROME_PATH = process.env.CHROME_PATH || "/usr/bin/chromium";
 
 // Asegurar carpeta de tokens
 fs.mkdirSync(VENOM_TOKENS_PATH, { recursive: true });
@@ -36,29 +36,35 @@ venom
       qrCodeBase64 = base64Qr;
       console.log("✅ QR recibido, disponible en /qr");
     },
-    browserPathExecutable: process.env.CHROME_PATH || undefined,
+    browserPathExecutable: CHROME_PATH,
   })
   .then((client) => {
     venomClient = client;
     console.log("🤖 Venom iniciado correctamente");
 
-    // Escuchar mensajes entrantes
     client.onMessage(async (message) => {
       console.log(`📩 Mensaje recibido: ${message.body} de ${message.from}`);
 
       // Respuesta automática simple
-      if (message.body.toLowerCase() === "hola") {
-        client.sendText(message.from, "¡Hola! Bot conectado 🚀").catch(console.error);
+      if (message.body && message.body.toLowerCase() === "hola") {
+        await client.sendText(message.from, "¡Hola! Bot conectado 🚀").catch(console.error);
       }
 
-      // Enviar mensaje a Botpress
+      // Enviar mensaje a Botpress si está configurado
       if (BOTPRESS_WEBHOOK_URL && message.body) {
         try {
           await axios.post(
             BOTPRESS_WEBHOOK_URL,
-            { from: message.from, message: message.body },
-            { headers: { Authorization: `Bearer ${BOTPRESS_API_KEY}` } }
+            {
+              type: "text",
+              text: message.body,
+              user: message.from
+            },
+            {
+              headers: { Authorization: `Bearer ${BOTPRESS_API_KEY}` }
+            }
           );
+          console.log("✅ Mensaje enviado a Botpress");
         } catch (err) {
           console.error("❌ Error enviando a Botpress:", err.message);
         }
@@ -90,30 +96,10 @@ app.post("/send-message", async (req, res) => {
   if (!venomClient) return res.status(400).json({ error: "Bot no iniciado" });
 
   const { to, message } = req.body;
-  const recipient = to || WHATSAPP_DEFAULT_NUMBER;
-
-  if (!recipient || !message)
-    return res.status(400).json({ error: "Faltan parámetros 'to' o 'message'" });
+  if (!to || !message) return res.status(400).json({ error: "Faltan parámetros 'to' o 'message'" });
 
   try {
-    await venomClient.sendText(recipient + "@c.us", message);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Webhook para Botpress (opcional)
-app.post("/botpress/response", async (req, res) => {
-  const secret = req.headers["x-botpress-secret"];
-  if (BOTPRESS_WEBHOOK_SECRET && secret !== BOTPRESS_WEBHOOK_SECRET)
-    return res.status(401).send("Unauthorized");
-
-  const { to, message } = req.body;
-  if (!to || !message) return res.status(400).send("Faltan parámetros");
-
-  try {
-    await venomClient.sendText(to + "@c.us", message);
+    await venomClient.sendText(to.includes("@c.us") ? to : to + "@c.us", message);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
