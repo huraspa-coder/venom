@@ -1,4 +1,3 @@
-// server.js
 const fs = require("fs");
 const path = require("path");
 const express = require("express");
@@ -8,23 +7,23 @@ const app = express();
 app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
-// Carpeta persistente en Railway usando la ruta montada
+// Carpeta persistente en Railway
 const VOLUME_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/data";
-const SESSION_DIR = path.join(VOLUME_PATH, "venom-session");
-const QR_PATH = path.join(SESSION_DIR, "qr.png");
+const SESSION_DIR = path.join(VOLUME_PATH, "venom-session", "tokens");
+const QR_PATH = path.join(SESSION_DIR, "venom-session", "qr.png");
 
-// Crear carpeta solo si no existe (por si acaso)
-fs.mkdirSync(SESSION_DIR, { recursive: true });
+// Crear carpeta si no existe
+fs.mkdirSync(path.join(SESSION_DIR, "venom-session"), { recursive: true });
 console.log("📂 Carpeta de tokens asegurada en:", SESSION_DIR);
 
 let venomClient;
 
-// Crear sesión Venom apuntando directamente a tu carpeta existente
+// Crear sesión Venom
 venom
   .create(
     "venom-session",
     (base64Qr) => {
-      // Guardar QR solo si se genera
+      // Guardar QR en caso de que no haya sesión válida
       const matches = base64Qr.match(/^data:image\/png;base64,(.+)$/);
       if (matches) {
         const buffer = Buffer.from(matches[1], "base64");
@@ -46,8 +45,8 @@ venom
         "--no-zygote",
         "--disable-gpu",
       ],
-      folderNameToken: "",          // <-- Evita crear subcarpetas adicionales
-      mkdirFolderToken: SESSION_DIR // <-- Usa la carpeta que ya subiste
+      mkdirFolderToken: SESSION_DIR,
+      folderNameToken: "venom-session",
     }
   )
   .then((client) => {
@@ -65,22 +64,20 @@ venom
 
 // Endpoints
 app.get("/", (req, res) => res.send("Venom BOT corriendo en Railway 🚀"));
-
 app.get("/qr", (req, res) => {
   if (fs.existsSync(QR_PATH)) res.sendFile(QR_PATH);
   else res.status(404).send("QR aún no generado");
 });
-
 app.get("/status", (req, res) => {
   if (venomClient && venomClient.isConnected()) res.json({ status: "logged" });
   else res.json({ status: "not_logged" });
 });
-
 app.post("/send-message", (req, res) => {
   const { to, message } = req.body;
   if (!venomClient) return res.status(400).json({ error: "Bot no iniciado" });
 
-  venomClient.sendText(to + "@c.us", message)
+  venomClient
+    .sendText(to + "@c.us", message)
     .then(() => res.json({ success: true }))
     .catch((err) => res.status(500).json({ error: err.message }));
 });
