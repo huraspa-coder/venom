@@ -1,114 +1,85 @@
 const express = require("express");
 const venom = require("venom-bot");
-const fs = require("fs");
-const path = require("path");
 const axios = require("axios");
-const jwt = require("jsonwebtoken");
 
 const app = express();
 app.use(express.json());
 
-// Variables de entorno
-const PORT = process.env.PORT || 3000;
-const SESSION_NAME = process.env.SESSION_NAME || "venom-session";
-const VENOM_TOKENS_PATH = process.env.VENOM_TOKENS_PATH || "/data/tokens";
-const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY || "";
-const BOTPRESS_WEBHOOK_ID = process.env.BOTPRESS_WEBHOOK_ID || ""; // solo ID
-const BOTPRESS_CHAT_API_BASE = "https://chat.botpress.cloud";
-const WHATSAPP_DEFAULT_NUMBER = process.env.WHATSAPP_DEFAULT_NUMBER || "";
+// 🔑 Variables de entorno (Railway)
+const BOTPRESS_API_URL = process.env.BOTPRESS_API_URL; // Ej: https://tu-botpress.railway.app
+const BOTPRESS_BOT_ID = process.env.BOTPRESS_BOT_ID;   // ID del bot
+const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY; // Token de Botpress
 
-// Asegurar carpeta de tokens
-fs.mkdirSync(VENOM_TOKENS_PATH, { recursive: true });
-console.log("📂 Carpeta de tokens asegurada en:", VENOM_TOKENS_PATH);
+// Persistencia de sesión
+let client;
 
-let qrCodeBase64 = null;
-let venomClient = null;
-
-// Iniciar Venom
 venom
-  .create({
-    session: SESSION_NAME,
-    multidevice: true,
-    headless: true,
-    folderNameToken: VENOM_TOKENS_PATH,
-    mkdirFolderToken: VENOM_TOKENS_PATH,
-    logQR: false,
-    catchQR: (base64Qr) => {
-      qrCodeBase64 = base64Qr;
-      console.log("✅ QR recibido, disponible en /qr");
+  .create(
+    "session-name",
+    (base64Qr, asciiQR) => {
+      console.log("⚡ Escanea este QR para iniciar sesión:");
+      console.log(asciiQR);
     },
-    browserPathExecutable: process.env.CHROME_PATH || undefined,
-  })
-  .then((client) => {
-    venomClient = client;
+    undefined,
+    { logQR: true, headless: true }
+  )
+  .then((venomClient) => {
+    client = venomClient;
     console.log("🤖 Venom iniciado correctamente");
 
+    // Manejo de mensajes entrantes
     client.onMessage(async (message) => {
       console.log(`📩 Mensaje recibido: ${message.body} de ${message.from}`);
-
-      // Respuesta automática simple
-      if (message.body.toLowerCase() === "hola") {
-        client.sendText(message.from, "¡Hola! Bot conectado 🚀").catch(console.error);
-      }
-
-      // Enviar mensaje a Botpress Chat API
-      if (BOTPRESS_WEBHOOK_ID && BOTPRESS_API_KEY) {
-        try {
-          const xUserKey = jwt.sign({ id: message.from }, BOTPRESS_API_KEY, { algorithm: "HS256" });
-
-          const response = await axios.post(
-            `${BOTPRESS_CHAT_API_BASE}/${BOTPRESS_WEBHOOK_ID}/messages`,
-            {
-              conversationId: message.from,
-              type: "text",
-              payload: { text: message.body },
-            },
-            {
-              headers: {
-                "x-user-key": xUserKey,
-                Authorization: `Bearer ${BOTPRESS_API_KEY}`,
-              },
-            }
-          );
-
-          console.log("✅ Mensaje enviado a Botpress Chat API", response.data);
-        } catch (err) {
-          console.error("❌ Error enviando a Botpress:", err.response?.data || err.message);
-        }
-      }
+      await sendToBotpress(message.body, message.from);
     });
   })
   .catch((err) => console.error("❌ Error iniciando Venom:", err));
 
-// Endpoints
+/**
+ * 🔗 Enviar mensaje a Botpress
+ */
+async function sendToBotpress(message, from) {
+  try {
+    const payload = {
+      type: "text",  // 👈 Necesario para Botpress
+      text: message, // Contenido del mensaje
+      from: from     // Identificador del usuario
+    };
 
-// Mostrar QR
-app.get("/qr", (req, res) => {
-  if (!qrCodeBase64) return res.send("⚡ QR aún no generado. Recarga en unos segundos...");
-  res.send(`
-    <html>
-      <body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;">
-        <h2>Escanea el QR con WhatsApp 📱</h2>
-        <img src="${qrCodeBase64}" />
-      </body>
-    </html>
-  `);
+    const response = await axios.post(
+      `${BOTPRESS_API_URL}/api/v1/bots/${BOTPRESS_BOT_ID}/converse/${from}`,
+      payload,
+      {
+        headers: {
+          Authorization: `Bearer ${BOTPRESS_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log("✅ Respuesta de Botpress:", response.data);
+
+    // Si Botpress responde con texto, lo enviamos de vuelta al usuario
+    if (response.data.responses && response.data.responses.length > 0) {
+      for (const reply of response.data.responses) {
+        if (reply.type === "text") {
+          await client.sendText(from, reply.text);
+        }
+      }
+    }
+  } catch (err) {
+    console.error(
+      "❌ Error enviando a Botpress:",
+      err.response?.data || err.message
+    );
+  }
+}
+
+// Endpoint de prueba
+app.get("/", (req, res) => {
+  res.send("✅ Server funcionando con Venom y Botpress");
 });
 
-// Healthcheck
-app.get("/", (req, res) => res.send("Venom BOT corriendo en Railway 🚀"));
-
-// Enviar mensaje vía Postman
-app.post("/send-message", (req, res) => {
-  if (!venomClient) return res.status(400).json({ error: "Bot no iniciado" });
-
-  const { to, message } = req.body;
-  if (!to || !message) return res.status(400).json({ error: "Faltan parámetros 'to' o 'message'" });
-
-  venomClient
-    .sendText(to + "@c.us", message)
-    .then(() => res.json({ success: true }))
-    .catch((err) => res.status(500).json({ error: err.message }));
-});
-
-app.listen(PORT, () => console.log(`✅ Servidor escuchando en puerto ${PORT}`));
+// 🚀 Levantar servidor
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`⚡ Server escuchando en puerto ${PORT}`));
