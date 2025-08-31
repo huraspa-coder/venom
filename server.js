@@ -1,80 +1,49 @@
-// server.js
+const express = require("express");
 const fs = require("fs");
 const path = require("path");
-const express = require("express");
 const venom = require("venom-bot");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Ruta persistente en Railway (volumen montado en /data)
-const SESSION_DIR = "/data/tokens";
+// Ruta de almacenamiento del QR
+const qrPath = "/data/tokens/qr.png";
 
-// Crear directorio si no existe
-if (!fs.existsSync(SESSION_DIR)) {
-  fs.mkdirSync(SESSION_DIR, { recursive: true });
-  console.log("📂 Carpeta creada:", SESSION_DIR);
-}
+// Servir el QR desde la ruta /qr
+app.get("/qr", (req, res) => {
+  if (fs.existsSync(qrPath)) {
+    res.sendFile(qrPath);
+  } else {
+    res.status(404).send("QR no encontrado todavía");
+  }
+});
 
-// Iniciar cliente de Venom
+// Crear sesión de Venom
 venom
   .create(
     "venom-session",
-    // Callback QR
-    (base64Qr, asciiQR) => {
-      console.log(asciiQR); // QR en consola
-      const qrPath = path.join(SESSION_DIR, "qr.png");
-
-      const matches = base64Qr.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+    (base64Qr) => {
+      // Convertir y guardar QR
+      let matches = base64Qr.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
       if (matches && matches.length === 3) {
-        const buffer = Buffer.from(matches[2], "base64");
-        fs.writeFileSync(qrPath, buffer);
+        let imageBuffer = Buffer.from(matches[2], "base64");
+        fs.mkdirSync(path.dirname(qrPath), { recursive: true });
+        fs.writeFileSync(qrPath, imageBuffer, "binary");
         console.log("✅ QR guardado en:", qrPath);
       }
     },
     undefined,
-    {
-      headless: true,
-      logQR: false,
-      browserPathExecutable: "/usr/bin/chromium",
-      browserArgs: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-first-run",
-        "--no-zygote",
-        "--disable-gpu",
-      ],
-      // tokens se guardarán en /data/tokens
-      mkdirFolderToken: SESSION_DIR,
-      folderNameToken: "venom-session",
-    }
+    { logQR: false, headless: true }
   )
-  .then((client) => start(client))
-  .catch((erro) => {
-    console.error("❌ Error iniciando Venom:", erro);
+  .then((client) => {
+    console.log("✅ Cliente iniciado correctamente");
+  })
+  .catch((err) => {
+    console.error("❌ Error iniciando Venom:", err);
   });
 
-// Función principal del bot
-function start(client) {
-  console.log("🤖 Venom BOT iniciado correctamente");
-
-  client.onMessage((message) => {
-    if (message.body.toLowerCase() === "hola") {
-      client
-        .sendText(message.from, "👋 Hola, soy tu bot en Railway!")
-        .then(() => console.log("Mensaje enviado"))
-        .catch((err) => console.error("Error al enviar mensaje", err));
-    }
-  });
-}
-
-// Endpoint para saber si está corriendo
-app.get("/", (req, res) => {
-  res.send("Venom BOT corriendo en Railway 🚀");
-});
-
+// Iniciar servidor Express
 app.listen(PORT, () => {
-  console.log(`🌍 Servidor escuchando en http://localhost:${PORT}`);
+  console.log(`🚀 Servidor escuchando en puerto ${PORT}`);
+  console.log(`👉 Accede al QR en: http://localhost:${PORT}/qr`);
 });
