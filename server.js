@@ -4,11 +4,12 @@ const express = require("express");
 const venom = require("venom-bot");
 
 const app = express();
-app.use(express.json()); // necesario para POST /send-message
+app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
-// Carpeta persistente en Railway
-const SESSION_DIR = "/data/venom-session";
+// Carpeta persistente en Railway usando la variable de entorno
+const VOLUME_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/data";
+const SESSION_DIR = path.join(VOLUME_PATH, "venom-session");
 const QR_PATH = path.join(SESSION_DIR, "qr.png");
 
 // Crear carpeta si no existe
