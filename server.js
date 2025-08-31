@@ -49,7 +49,7 @@ venom
         client.sendText(message.from, "¡Hola! Bot conectado 🚀").catch(console.error);
       }
 
-      // Enviar mensaje a Botpress
+      // Enviar mensaje a Botpress si está configurado
       if (BOTPRESS_WEBHOOK_URL) {
         axios
           .post(
@@ -88,10 +88,14 @@ app.post("/send-message", (req, res) => {
   const { to, message } = req.body;
   if (!to || !message) return res.status(400).json({ error: "Faltan parámetros 'to' o 'message'" });
 
+  // Asegurarse que el número termine con @c.us
+  const recipient = to.endsWith("@c.us") ? to : to + "@c.us";
+
   venomClient
-    .sendText(to + "@c.us", message)
+    .sendText(recipient, message)
     .then(() => res.json({ success: true }))
     .catch((err) => res.status(500).json({ error: err.message }));
 });
 
+// Servidor
 app.listen(PORT, () => console.log(`✅ Servidor escuchando en puerto ${PORT}`));
