@@ -1,83 +1,59 @@
-const fs = require("fs");
-const path = require("path");
 const express = require("express");
 const venom = require("venom-bot");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
-app.use(express.json());
 const PORT = process.env.PORT || 3000;
+const SESSION_NAME = process.env.SESSION_NAME || "venom-session";
+const VENOM_TOKENS_PATH = process.env.VENOM_TOKENS_PATH || "./tokens";
 
-// Carpeta persistente en Railway usando la variable de entorno
-const VOLUME_PATH = process.env.RAILWAY_VOLUME_MOUNT_PATH || "/data";
-const SESSION_DIR = path.join(VOLUME_PATH, "venom-session");
-const QR_PATH = path.join(SESSION_DIR, "qr.png");
+let qrCodeBase64 = null;
 
-// Crear carpeta si no existe
-fs.mkdirSync(SESSION_DIR, { recursive: true });
-console.log("📂 Carpeta de tokens asegurada en:", SESSION_DIR);
-
-let venomClient;
-
-// Crear sesión Venom
+// Iniciar Venom
 venom
-  .create(
-    process.env.SESSION_NAME || "venom-session",
-    (base64Qr) => {
-      const matches = base64Qr.match(/^data:image\/png;base64,(.+)$/);
-      if (matches) {
-        const buffer = Buffer.from(matches[1], "base64");
-        fs.writeFileSync(QR_PATH, buffer, "binary");
-        console.log("✅ QR guardado en:", QR_PATH);
-      }
+  .create({
+    session: SESSION_NAME,
+    multidevice: true,
+    headless: true,
+    folderNameToken: VENOM_TOKENS_PATH,
+    mkdirFolderToken: VENOM_TOKENS_PATH,
+    logQR: false, // ⛔ no log en consola
+    catchQR: (base64Qr, asciiQR) => {
+      console.log("✅ QR recibido, disponible en /qr");
+      qrCodeBase64 = base64Qr;
     },
-    undefined,
-    {
-      headless: true,
-      logQR: false,
-      browserPathExecutable: process.env.CHROME_PATH || "/usr/bin/chromium",
-      browserArgs: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-first-run",
-        "--no-zygote",
-        "--disable-gpu",
-      ],
-      mkdirFolderToken: SESSION_DIR,
-      folderNameToken: "", // <- dejar vacío para usar la carpeta tal cual
-    }
-  )
-  .then((client) => {
-    venomClient = client;
-    console.log("🤖 Venom iniciado correctamente");
-
-    client.onMessage((message) => {
-      console.log(`📩 Mensaje recibido: ${message.body} de ${message.from}`);
-      if (message.body.toLowerCase() === "hola") {
-        client.sendText(message.from, "👋 Hola, bot funcionando!").catch(console.error);
-      }
-    });
   })
-  .catch((err) => console.error("❌ Error iniciando Venom:", err));
+  .then((client) => start(client))
+  .catch((err) => console.error(err));
 
-// Endpoints
-app.get("/", (req, res) => res.send("Venom BOT corriendo en Railway 🚀"));
+function start(client) {
+  console.log("✅ Venom iniciado correctamente en Railway");
+  client.onMessage((message) => {
+    if (message.body === "Hola") {
+      client.sendText(message.from, "¡Hola! Bot conectado 🚀");
+    }
+  });
+}
+
+// Endpoint para ver el QR
 app.get("/qr", (req, res) => {
-  if (fs.existsSync(QR_PATH)) res.sendFile(QR_PATH);
-  else res.status(404).send("QR aún no generado");
-});
-app.get("/status", (req, res) => {
-  if (venomClient && venomClient.isConnected()) res.json({ status: "logged" });
-  else res.json({ status: "not_logged" });
-});
-app.post("/send-message", (req, res) => {
-  const { to, message } = req.body;
-  if (!venomClient) return res.status(400).json({ error: "Bot no iniciado" });
-
-  venomClient.sendText(to + "@c.us", message)
-    .then(() => res.json({ success: true }))
-    .catch((err) => res.status(500).json({ error: err.message }));
+  if (!qrCodeBase64) {
+    return res.send("⚡ QR aún no generado. Recarga en unos segundos...");
+  }
+  res.send(`
+    <html>
+      <body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;">
+        <h2>Escanea el QR con WhatsApp 📱</h2>
+        <img src="${qrCodeBase64}" />
+      </body>
+    </html>
+  `);
 });
 
-app.listen(PORT, () => console.log(`🚀 Servidor escuchando en puerto ${PORT}`));
+// Endpoint de salud
+app.get("/", (req, res) => {
+  res.send("Venom BOT corriendo en Railway 🚀");
+});
+
+app.listen(PORT, () => console.log(`✅ Servidor escuchando en puerto ${PORT}`));
