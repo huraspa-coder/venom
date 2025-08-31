@@ -56,18 +56,22 @@ venom
         try {
           const xUserKey = jwt.sign({ id: message.from }, BOTPRESS_API_KEY, { algorithm: "HS256" });
 
-          await axios.post(
-            `${BOTPRESS_CHAT_API_BASE}/${BOTPRESS_WEBHOOK_ID}/createMessage`,
+          const response = await axios.post(
+            `${BOTPRESS_CHAT_API_BASE}/${BOTPRESS_WEBHOOK_ID}/messages`,
             {
               conversationId: message.from,
               type: "text",
-              text: message.body,
+              payload: { text: message.body },
             },
             {
-              headers: { "x-user-key": xUserKey },
+              headers: {
+                "x-user-key": xUserKey,
+                Authorization: `Bearer ${BOTPRESS_API_KEY}`,
+              },
             }
           );
-          console.log("✅ Mensaje enviado a Botpress Chat API");
+
+          console.log("✅ Mensaje enviado a Botpress Chat API", response.data);
         } catch (err) {
           console.error("❌ Error enviando a Botpress:", err.response?.data || err.message);
         }
