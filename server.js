@@ -1,4 +1,4 @@
-// server.js — Venom + Botpress Chat API (actualizado)
+// server.js — versión final para Venom + Botpress Chat API
 const express = require("express");
 const venom = require("venom-bot");
 const fs = require("fs");
@@ -21,14 +21,17 @@ const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY || "";       // Encryption
 const BOTPRESS_WEBHOOK_SECRET = process.env.BOTPRESS_WEBHOOK_SECRET || "";
 const CHAT_BASE = "https://chat.botpress.cloud";
 
-// ====== Persistencia ======
+// ====== Persistencia (no tocar) ======
 fs.mkdirSync(VENOM_TOKENS_PATH, { recursive: true });
 console.log("📂 Carpeta de tokens asegurada en:", VENOM_TOKENS_PATH);
 
 let qrCodeBase64 = null;
 let venomClient = null;
 
-// ====== Venom ======
+// ====== Función para normalizar IDs para Botpress ======
+const normalizeId = (id) => id.replace(/[@.]/g, "_");
+
+// ====== Venom Bot ======
 venom
   .create({
     session: SESSION_NAME,
@@ -48,12 +51,12 @@ venom
     console.log("🤖 Venom iniciado correctamente");
 
     client.onMessage(async (message) => {
-      const from = message.from;
+      const from = message.from; // ej: 569XXXXXXXX@c.us
       const text = message?.body ?? "";
 
       console.log(`📩 Mensaje recibido: ${text} de ${from}`);
 
-      // Respuesta rápida local
+      // Respuesta local rápida (no tocar)
       if (text.toLowerCase() === "hola") {
         client.sendText(from, "¡Hola! Bot conectado 🚀").catch(console.error);
       }
@@ -63,24 +66,27 @@ venom
 
       try {
         const userId = from; // mantenemos JID como id de usuario
-        const xUserKey = jwt.sign({ id: userId }, BOTPRESS_API_KEY, { algorithm: "HS256" });
+        const normalizedId = normalizeId(userId);
 
-        // getOrCreateUser
-        const userRes = await axios.post(
+        // firmar x-user-key (JWT HS256)
+        const xUserKey = jwt.sign({ id: normalizedId }, BOTPRESS_API_KEY, { algorithm: "HS256" });
+
+        // 1) getOrCreateUser
+        await axios.post(
           `${CHAT_BASE}/${BOTPRESS_WEBHOOK_ID}/users/get-or-create`,
-          { id: userId },
+          { id: normalizedId },
           { headers: { "x-user-key": xUserKey } }
         );
 
-        // getOrCreateConversation
+        // 2) getOrCreateConversation
         const convRes = await axios.post(
           `${CHAT_BASE}/${BOTPRESS_WEBHOOK_ID}/conversations/get-or-create`,
-          { id: userId },
+          { id: normalizedId },
           { headers: { "x-user-key": xUserKey } }
         );
-        const conversationId = convRes.data?.conversation?.id || convRes.data?.id || userId;
+        const conversationId = convRes.data?.conversation?.id || convRes.data?.id || normalizedId;
 
-        // Enviar mensaje a Botpress
+        // 3) Enviar message
         const msgRes = await axios.post(
           `${CHAT_BASE}/${BOTPRESS_WEBHOOK_ID}/messages`,
           {
@@ -90,7 +96,7 @@ venom
           { headers: { "x-user-key": xUserKey } }
         );
 
-        console.log("✅ Mensaje enviado a Botpress Chat API (user/conversation):", userId, conversationId);
+        console.log("✅ Mensaje enviado a Botpress Chat API (user/conversation):", normalizedId, conversationId);
       } catch (err) {
         const detail = err.response?.data || err.message;
         console.error("❌ Error enviando a Botpress:", detail);
@@ -129,7 +135,7 @@ app.post("/send-message", async (req, res) => {
   }
 });
 
-// ====== Webhook Botpress -> Venom ======
+// ====== Webhook para Botpress -> Venom ======
 app.post("/botpress/response", async (req, res) => {
   try {
     if (BOTPRESS_WEBHOOK_SECRET) {
@@ -138,29 +144,13 @@ app.post("/botpress/response", async (req, res) => {
     }
 
     const body = req.body || {};
+    const conversationId = body.conversationId || body?.conversation?.id || body?.payload?.conversationId;
+    const text = body?.message?.text || body?.payload?.message?.text || body?.text;
 
-    // Conversación
-    const conversationIdRaw =
-      body.conversationId ||
-      body?.conversation?.id ||
-      body?.payload?.conversationId ||
-      body?.data?.conversationId ||
-      body?.data?.conversation?.id;
+    if (!venomClient || !conversationId || !text) return res.json({ received: true, forwarded: false });
 
-    // Texto
-    const text =
-      body?.payload?.text ||
-      body?.payload?.message?.text ||
-      body?.message?.text ||
-      body?.text ||
-      body?.data?.payload?.text;
-
-    if (!venomClient || !conversationIdRaw || !text)
-      return res.json({ received: true, forwarded: false });
-
-    const jid = conversationIdRaw.endsWith("@c.us") ? conversationIdRaw : conversationIdRaw.replace(/_/g, "@");
+    const jid = conversationId.endsWith("@c.us") ? conversationId : `${conversationId}@c.us`;
     await venomClient.sendText(jid, text);
-
     return res.json({ received: true, forwarded: true });
   } catch (err) {
     return res.status(500).json({ error: err.message });
