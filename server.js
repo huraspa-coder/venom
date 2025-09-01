@@ -85,7 +85,7 @@ venom
         // 3) Enviar mensaje a Botpress
         await axios.post(
           `${CHAT_BASE}/${BOTPRESS_WEBHOOK_ID}/messages`,
-          { conversationId, message: { type: "text", text } },
+          { conversationId, payload: { type: "text", text } },
           { headers: { "x-user-key": xUserKey } }
         );
 
