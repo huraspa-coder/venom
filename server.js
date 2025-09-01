@@ -28,9 +28,6 @@ console.log("📂 Carpeta de tokens asegurada en:", VENOM_TOKENS_PATH);
 let qrCodeBase64 = null;
 let venomClient = null;
 
-// ====== Función para sanear IDs ======
-const sanitizeId = (id) => id.replace(/[^a-zA-Z0-9-_]/g, "_");
-
 // ====== Venom ======
 venom
   .create({
@@ -65,31 +62,30 @@ venom
       if (!BOTPRESS_WEBHOOK_ID || !BOTPRESS_API_KEY) return;
 
       try {
-        const userId = sanitizeId(from); // sanear ID para Botpress
+        const userId = from;
         const xUserKey = jwt.sign({ id: userId }, BOTPRESS_API_KEY, { algorithm: "HS256" });
 
-        // 1) getOrCreateUser
+        // getOrCreateUser
         const userRes = await axios.post(
           `${CHAT_BASE}/${BOTPRESS_WEBHOOK_ID}/users/get-or-create`,
           { id: userId },
           { headers: { "x-user-key": xUserKey } }
         );
 
-        // 2) getOrCreateConversation
+        // getOrCreateConversation
         const convRes = await axios.post(
           `${CHAT_BASE}/${BOTPRESS_WEBHOOK_ID}/conversations/get-or-create`,
           { id: userId },
           { headers: { "x-user-key": xUserKey } }
         );
+        const conversationId = convRes.data?.conversation?.id || convRes.data?.id || userId;
 
-        const conversationId = sanitizeId(convRes.data?.conversation?.id || convRes.data?.id || userId);
-
-        // 3) Enviar mensaje a Botpress
+        // Enviar message con propiedad 'payload'
         const msgRes = await axios.post(
           `${CHAT_BASE}/${BOTPRESS_WEBHOOK_ID}/messages`,
           {
             conversationId,
-            message: { type: "text", text },
+            payload: { type: "text", text } // <-- CORRECCIÓN
           },
           { headers: { "x-user-key": xUserKey } }
         );
@@ -142,8 +138,8 @@ app.post("/botpress/response", async (req, res) => {
     }
 
     const body = req.body || {};
-    const conversationId = sanitizeId(body.conversationId || body?.conversation?.id || body?.payload?.conversationId);
-    const text = body?.message?.text || body?.payload?.message?.text || body?.text;
+    const conversationId = body.conversationId || body?.conversation?.id || body?.payload?.conversationId;
+    const text = body?.payload?.message?.text || body?.payload?.text || body?.text;
 
     if (!venomClient || !conversationId || !text) return res.json({ received: true, forwarded: false });
 
