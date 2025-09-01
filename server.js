@@ -1,4 +1,4 @@
-// server.js — Venom + Botpress Chat API
+// server.js — versión final para Chat API y Botpress
 const express = require("express");
 const venom = require("venom-bot");
 const fs = require("fs");
@@ -16,22 +16,19 @@ const VENOM_TOKENS_PATH = process.env.VENOM_TOKENS_PATH || "/data/tokens";
 const CHROME_PATH = process.env.CHROME_PATH || undefined;
 
 // Botpress Chat API
-const BOTPRESS_WEBHOOK_ID = process.env.BOTPRESS_WEBHOOK_ID || ""; // Integration ID
-const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY || "";       // Encryption Key HS256
+const BOTPRESS_WEBHOOK_ID = process.env.BOTPRESS_WEBHOOK_ID || "";
+const BOTPRESS_API_KEY = process.env.BOTPRESS_API_KEY || "";
 const BOTPRESS_WEBHOOK_SECRET = process.env.BOTPRESS_WEBHOOK_SECRET || "";
 const CHAT_BASE = "https://chat.botpress.cloud";
 
-// ====== Persistencia de tokens ======
+// ====== Persistencia ======
 fs.mkdirSync(VENOM_TOKENS_PATH, { recursive: true });
 console.log("📂 Carpeta de tokens asegurada en:", VENOM_TOKENS_PATH);
 
 let qrCodeBase64 = null;
 let venomClient = null;
 
-// ====== Función para sanitizar IDs ======
-const sanitizeId = (jid) => jid.replace(/[^a-zA-Z0-9-_]/g, "_");
-
-// ====== Inicialización Venom ======
+// ====== Venom ======
 venom
   .create({
     session: SESSION_NAME,
@@ -51,7 +48,7 @@ venom
     console.log("🤖 Venom iniciado correctamente");
 
     client.onMessage(async (message) => {
-      const from = message.from; // ej: 569XXXXXXXX@c.us
+      const from = message.from;
       const text = message?.body ?? "";
 
       console.log(`📩 Mensaje recibido: ${text} de ${from}`);
@@ -61,35 +58,36 @@ venom
         client.sendText(from, "¡Hola! Bot conectado 🚀").catch(console.error);
       }
 
+      // Salimos si Botpress no está configurado
       if (!BOTPRESS_WEBHOOK_ID || !BOTPRESS_API_KEY) return;
 
       try {
-        const userId = sanitizeId(from);
+        const userId = from;
         const xUserKey = jwt.sign({ id: userId }, BOTPRESS_API_KEY, { algorithm: "HS256" });
 
-        // 1) getOrCreateUser
-        await axios.post(
+        // getOrCreateUser
+        const userRes = await axios.post(
           `${CHAT_BASE}/${BOTPRESS_WEBHOOK_ID}/users/get-or-create`,
           { id: userId },
           { headers: { "x-user-key": xUserKey } }
         );
 
-        // 2) getOrCreateConversation
+        // getOrCreateConversation
         const convRes = await axios.post(
           `${CHAT_BASE}/${BOTPRESS_WEBHOOK_ID}/conversations/get-or-create`,
           { id: userId },
           { headers: { "x-user-key": xUserKey } }
         );
-        const conversationId = sanitizeId(convRes.data?.conversation?.id || convRes.data?.id || userId);
+        const conversationId = convRes.data?.conversation?.id || convRes.data?.id || userId;
 
-        // 3) Enviar mensaje a Botpress
-        await axios.post(
+        // Enviar mensaje a Botpress
+        const msgRes = await axios.post(
           `${CHAT_BASE}/${BOTPRESS_WEBHOOK_ID}/messages`,
-          { conversationId, payload: { type: "text", text } },
+          { conversationId, message: { type: "text", text } },
           { headers: { "x-user-key": xUserKey } }
         );
 
-        console.log("✅ Mensaje enviado a Botpress Chat API");
+        console.log("✅ Mensaje enviado a Botpress Chat API:", msgRes.data || "(ok)");
       } catch (err) {
         const detail = err.response?.data || err.message;
         console.error("❌ Error enviando a Botpress:", detail);
@@ -137,15 +135,27 @@ app.post("/botpress/response", async (req, res) => {
     }
 
     const body = req.body || {};
-    const conversationId = sanitizeId(body.conversationId || body?.conversation?.id || body?.payload?.conversationId);
-    const text = body?.message?.text || body?.payload?.message?.text || body?.text;
+    const conversationId =
+      body.conversationId ||
+      body?.conversation?.id ||
+      body?.payload?.conversationId;
 
-    if (!venomClient || !conversationId || !text) return res.json({ received: true, forwarded: false });
+    const text =
+      body?.payload?.message?.text ||
+      body?.payload?.text ||
+      body?.message?.text ||
+      body?.text;
+
+    if (!venomClient || !conversationId || !text) {
+      console.log("⚠️ Mensaje recibido de Botpress incompleto:", body);
+      return res.json({ received: true, forwarded: false });
+    }
 
     const jid = conversationId.endsWith("@c.us") ? conversationId : `${conversationId}@c.us`;
     await venomClient.sendText(jid, text);
     return res.json({ received: true, forwarded: true });
   } catch (err) {
+    console.error("❌ Error procesando mensaje Botpress → Venom:", err.message);
     return res.status(500).json({ error: err.message });
   }
 });
