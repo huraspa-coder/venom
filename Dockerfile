@@ -1,4 +1,4 @@
-# Dockerfile para correr Venom con Chromium en Railway (Node 20)
+# Dockerfile para correr Venom con Chromium en Railway (Node 20) 
 FROM node:20-bullseye
 
 # Evitar preguntas interactivas
