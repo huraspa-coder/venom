@@ -1,4 +1,4 @@
-// server.js — Venom <-> Railway (robusto y con QR visible)
+// server.js — Venom <-> Railway (robusto y QR con logo)
 const express = require("express");
 const venom = require("venom-bot");
 const fs = require("fs");
@@ -11,7 +11,7 @@ let lastQr = null;
 // 🔹 Ruta de tokens en Railway
 const SESSION_PATH = "/data/tokens/venom-session";
 
-// 🔹 Si hay sesión corrupta, borrarla antes de iniciar
+// 🔹 Borrar sesión previa si existe (para forzar nuevo QR)
 if (fs.existsSync(SESSION_PATH)) {
   try {
     fs.rmSync(SESSION_PATH, { recursive: true, force: true });
@@ -60,14 +60,13 @@ function startBot(client) {
   });
 }
 
-// 🔹 Endpoint para mostrar el QR
+// 🔹 Endpoint para mostrar el QR con logo de WhatsApp
 app.get("/qr", (req, res) => {
   if (!lastQr) {
     return res.send(`
       <html>
         <body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:sans-serif;">
           <h2>⚡ QR aún no generado. Revisa los logs.</h2>
-          <p>Si ya estabas conectado, no verás QR porque la sesión sigue activa.</p>
         </body>
       </html>
     `);
@@ -77,7 +76,11 @@ app.get("/qr", (req, res) => {
     <html>
       <body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:sans-serif;">
         <h2>Escanea este QR con WhatsApp</h2>
-        <img src="${lastQr}" style="width:300px;height:300px;border:8px solid #000;border-radius:12px;"/>
+        <div style="position: relative; display:inline-block;">
+          <img src="${lastQr}" style="width:300px; height:300px;"/>
+          <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" 
+               style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); width:60px; height:60px; border-radius:12px;"/>
+        </div>
         <p>Abre WhatsApp → Menú → Dispositivos vinculados → Escanear QR</p>
       </body>
     </html>
