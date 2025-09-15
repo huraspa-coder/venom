@@ -1,5 +1,5 @@
-# Dockerfile para correr Venom con Chromium en Railway (Node 20) 
-FROM node:20-bullseye
+# Dockerfile para correr Venom con Chromium en Railway (Node 20)
+FROM node:20-bookworm-slim
 
 # Evitar preguntas interactivas
 ENV DEBIAN_FRONTEND=noninteractive
@@ -13,11 +13,9 @@ RUN apt-get update && apt-get install -y \
     libgdk-pixbuf2.0-0 libglib2.0-0 libgtk-3-0 libnspr4 libnss3 libpango-1.0-0 \
     libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 \
     libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 \
+    chromium \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
-
-# Instalar Chromium (opción simple)
-RUN apt-get update && apt-get install -y chromium && rm -rf /var/lib/apt/lists/* || true
 
 # Directorio de trabajo
 WORKDIR /usr/src/app
