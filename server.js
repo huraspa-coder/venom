@@ -1,4 +1,4 @@
-// server.js — Venom <-> Railway (robusto y QR con logo)
+// server.js — Venom <-> Railway (robusto, QR con logo, mensajes de prueba)
 const express = require("express");
 const venom = require("venom-bot");
 const fs = require("fs");
@@ -53,10 +53,16 @@ venom
 function startBot(client) {
   console.log("🤖 Venom iniciado correctamente");
 
+  // Mensajes de prueba
   client.onMessage((message) => {
-    if (message.body === "ping") {
+    console.log("📝 Mensaje recibido:", message.body, "de:", message.from);
+
+    if (message.body.toLowerCase() === "ping") {
       client.sendText(message.from, "pong 🏓");
     }
+
+    // Puedes agregar más mensajes de prueba aquí
+    // if(message.body.toLowerCase() === "hola") { ... }
   });
 }
 
