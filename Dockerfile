@@ -4,7 +4,7 @@ FROM node:20-bookworm-slim
 # Evitar preguntas interactivas
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Instalar dependencias para Chromium / Puppeteer
+# Instalar dependencias necesarias para Chromium / Puppeteer
 RUN apt-get update && apt-get install -y \
     ca-certificates wget gnupg --no-install-recommends && \
     apt-get install -y \
@@ -17,20 +17,20 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
 
-# Directorio de trabajo
+# Crear carpeta de trabajo
 WORKDIR /usr/src/app
 
-# Copiar package.json y lock para instalar deps (mejor cache)
+# Copiar package.json y package-lock.json para aprovechar cache de npm
 COPY package*.json ./
 
-# Instalar solo dependencias necesarias y saltar scripts que no aplican en Railway
+# Instalar dependencias
 RUN npm install --production --ignore-scripts
 
-# Copiar resto del repo
+# Copiar el resto del proyecto
 COPY . .
 
-# Exponer puerto para endpoint opcional (ver server.js)
+# Exponer el puerto
 ENV PORT=3000
 
-# Arranque
+# Comando de arranque
 CMD ["node", "server.js"]
