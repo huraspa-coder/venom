@@ -126,7 +126,20 @@ function tryOpenChromium(url) {
 
     client.onStateChange((state) => console.log("State changed:", state));
 
-    client.onMessage((message) => console.log("Mensaje entrante:", message.from, message.body));
+    client.onMessage(async (message) => {
+  console.log("Mensaje entrante:", message.from, message.body);
+
+  // Ejemplo de respuesta automática simple
+  if (message.body) {
+    try {
+      await client.sendText(message.from, `Recibí tu mensaje: "${message.body}"`);
+      console.log("Respuesta enviada a", message.from);
+    } catch (err) {
+      console.error("Error enviando mensaje:", err);
+    }
+  }
+});
+
 
     app.listen(PORT, () => {
       const url = `http://localhost:${PORT}/qr`;
