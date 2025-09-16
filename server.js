@@ -1,100 +1,200 @@
-// server.js — Venom <-> Railway (robusto, QR con logo, mensajes de prueba)
+// server.js — Venom + Express + abrir Chromium con QR visible y auto-refresh
 const express = require("express");
 const venom = require("venom-bot");
 const fs = require("fs");
+const path = require("path");
+const { spawn, execSync } = require("child_process");
 
 const app = express();
 app.use(express.json());
 
-let lastQr = null;
+const PORT = process.env.PORT || 3000;
+const SESSION_PATH = process.env.SESSION_PATH || path.join(__dirname, "session"); // ajustar si usas otro path
 
-// 🔹 Ruta de tokens en Railway
-const SESSION_PATH = "/data/tokens/venom-session";
+// carpeta pública donde se guardará qr.png y qr.html
+const PUBLIC_DIR = path.join(__dirname, "public");
+if (!fs.existsSync(PUBLIC_DIR)) fs.mkdirSync(PUBLIC_DIR, { recursive: true });
 
-// 🔹 Borrar sesión previa si existe (para forzar nuevo QR)
-if (fs.existsSync(SESSION_PATH)) {
-  try {
-    fs.rmSync(SESSION_PATH, { recursive: true, force: true });
-    console.log("⚡ Sesión anterior borrada. Se pedirá nuevo QR.");
-  } catch (err) {
-    console.error("❌ Error borrando sesión previa:", err);
-  }
-}
+// archivo QR
+const QR_FILE = path.join(PUBLIC_DIR, "qr.png");
 
-// 🔹 Iniciar Venom
-venom
-  .create(
-    {
-      session: "venom-session",
-      headless: true,
-      useChrome: true,
-      executablePath: "/usr/bin/chromium",
-      browserArgs: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-accelerated-2d-canvas",
-        "--no-first-run",
-        "--no-zygote",
-        "--single-process",
-        "--disable-gpu",
-      ],
-      disableWelcome: true,
-    },
-    (base64Qr) => {
-      lastQr = base64Qr;
-      console.log("⚡ Nuevo QR generado, escanéalo en /qr");
+// simple SSE broadcaster para notificar cambios del QR a la página
+let clients = [];
+app.get("/events", (req, res) => {
+  res.set({
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+  res.flushHeaders();
+  res.write("retry: 10000\n\n");
+
+  clients.push(res);
+  req.on("close", () => {
+    clients = clients.filter((c) => c !== res);
+  });
+});
+
+// sirve archivos estáticos (qr.png, qr.html, logo si quieres)
+app.use(express.static(PUBLIC_DIR));
+
+// ruta amigable para ver el QR
+app.get("/qr", (req, res) => {
+  res.sendFile(path.join(PUBLIC_DIR, "qr.html"));
+});
+
+function notifyClients() {
+  const msg = `data: update\n\n`;
+  clients.forEach((res) => {
+    try {
+      res.write(msg);
+    } catch (e) {
+      // ignore
     }
-  )
-  .then((client) => startBot(client))
-  .catch((err) => console.error("❌ Error al iniciar Venom:", err));
-
-// 🔹 Lógica del bot
-function startBot(client) {
-  console.log("🤖 Venom iniciado correctamente");
-
-  // Mensajes de prueba
-  client.onMessage((message) => {
-    console.log("📝 Mensaje recibido:", message.body, "de:", message.from);
-
-    if (message.body.toLowerCase() === "ping") {
-      client.sendText(message.from, "pong 🏓");
-    }
-
-    // Puedes agregar más mensajes de prueba aquí
-    // if(message.body.toLowerCase() === "hola") { ... }
   });
 }
 
-// 🔹 Endpoint para mostrar el QR con logo de WhatsApp
-app.get("/qr", (req, res) => {
-  if (!lastQr) {
-    return res.send(`
-      <html>
-        <body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:sans-serif;">
-          <h2>⚡ QR aún no generado. Revisa los logs.</h2>
-        </body>
-      </html>
-    `);
+// crea la página qr.html (si no existe) con JS que escucha SSE y actualiza la imagen automáticamente
+const QR_HTML = path.join(PUBLIC_DIR, "qr.html");
+if (!fs.existsSync(QR_HTML)) {
+  const html = `<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>QR Venom</title>
+<style>
+  body{display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f6f7fb;font-family:system-ui,Arial}
+  .card{background:#fff;padding:24px;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,0.08);text-align:center}
+  img{width:320px;height:320px;object-fit:contain}
+  h1{font-size:18px;margin:0 0 12px}
+  p{color:#555;margin:8px 0 0;font-size:13px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Escanea el QR con WhatsApp</h1>
+  <img id="qr" src="qr.png?ts=${Date.now()}" alt="QR">
+  <p id="status">Esperando QR...</p>
+</div>
+
+<script>
+  const evt = new EventSource('/events');
+  const qrImg = document.getElementById('qr');
+  const status = document.getElementById('status');
+
+  evt.onmessage = function(e) {
+    // cuando backend avisa, refrescamos la imagen con query param para evitar cache
+    qrImg.src = 'qr.png?ts=' + Date.now();
+    status.textContent = 'QR actualizado: ' + new Date().toLocaleTimeString();
+  };
+
+  evt.onerror = function() {
+    status.textContent = 'Conexión SSE perdida. Intenta recargar la página.';
+  };
+</script>
+</body>
+</html>`;
+  fs.writeFileSync(QR_HTML, html, "utf8");
+}
+
+// función para intentar abrir Chromium (varios binarios comunes)
+function tryOpenChromium(url) {
+  const candidates = ["chromium", "chromium-browser", "google-chrome", "chrome", "brave-browser"];
+  for (const exe of candidates) {
+    try {
+      const which = execSync(`which ${exe}`, { stdio: ["pipe", "pipe", "ignore"] }).toString().trim();
+      if (which) {
+        // abrimos en modo normal (no headless). --new-window para enfocarlo
+        spawn(which, [url, "--new-window"], {
+          detached: true,
+          stdio: "ignore",
+        }).unref();
+        console.log(`Intentando abrir ${exe} en ${url}`);
+        return true;
+      }
+    } catch (e) {
+      // no encontrado, probar siguiente
+    }
   }
+  console.warn("No se encontró ejecutable Chromium/Chrome. Abre manualmente: " + url);
+  return false;
+}
 
-  res.send(`
-    <html>
-      <body style="display:flex;justify-content:center;align-items:center;height:100vh;flex-direction:column;font-family:sans-serif;">
-        <h2>Escanea este QR con WhatsApp</h2>
-        <div style="position: relative; display:inline-block;">
-          <img src="${lastQr}" style="width:300px; height:300px;"/>
-          <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" 
-               style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); width:60px; height:60px; border-radius:12px;"/>
-        </div>
-        <p>Abre WhatsApp → Menú → Dispositivos vinculados → Escanear QR</p>
-      </body>
-    </html>
-  `);
-});
+// Inicializamos Venom
+(async () => {
+  try {
+    const client = await venom.create(
+      // session name
+      {
+        session: SESSION_PATH,
+        multidevice: true,
+      },
+      (base64Qr, asciiQR, attempts, urlCode) => {
+        // handler opcional de QR en creación (algunos flujos devuelven el base64 aquí)
+        // si te llega base64 desde aquí, también lo guardamos
+        if (base64Qr) {
+          saveQrBase64(base64Qr);
+        }
+      },
+      (statusSession, session) => {
+        console.log("StatusSession:", statusSession);
+      },
+      {
+        // ajustes puppeteer para asegurar que no sea headless (si se desea)
+        headless: true, // Venom usa puppeteer internamente; mantenemos headless interno
+      }
+    );
 
-// 🔹 Servidor Express
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor escuchando en puerto ${PORT}`);
-});
+    // alternativa: cliente emite 'qr' via client.on
+    try {
+      client.on("qr", (base64Qr) => {
+        if (base64Qr) saveQrBase64(base64Qr);
+      });
+    } catch (e) {
+      // algunas versiones usan client.on('qr')
+    }
+
+    client.onAny((event) => {
+      // opcional: para debug puedes descomentar
+      // console.log("Evento Venom:", event);
+    });
+
+    // example: cliente conectado -> log
+    client.onStateChange((state) => {
+      console.log("State changed:", state);
+    });
+
+    // si el cliente recibe mensajes y no te llegan, revisa que tu webhook / integracion esté webhook-enabled.
+    client.onMessage((message) => {
+      console.log("Mensaje entrante:", message.from, message.body);
+      // aquí puedes procesarlos / reenviarlos a tu server interno
+    });
+
+    // starter de express
+    app.listen(PORT, () => {
+      const url = `http://localhost:${PORT}/qr`;
+      console.log(`Servidor QR corriendo en ${url}`);
+      // intenta abrir Chromium (no falla si no existe)
+      tryOpenChromium(url);
+    });
+
+  } catch (err) {
+    console.error("Error inicializando Venom:", err);
+    process.exit(1);
+  }
+})();
+
+// guarda base64 (data:image/png;base64,...) a public/qr.png
+function saveQrBase64(data) {
+  try {
+    // data puede venir con o sin prefijo "data:image/png;base64,"
+    const base64 = data.split(",").pop();
+    const buffer = Buffer.from(base64, "base64");
+    fs.writeFileSync(QR_FILE, buffer);
+    console.log("QR guardado en", QR_FILE);
+    notifyClients();
+  } catch (e) {
+    console.error("Error guardando QR:", e);
+  }
+}
